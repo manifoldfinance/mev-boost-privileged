@@ -72,6 +72,17 @@ func newTestBackend(t *testing.T, numRelays int, relayTimeout time.Duration) *te
 	return &backend
 }
 
+func (be *testBackend) setPrivilegedBuilders(pubKey phase0.BLSPubKey) *testBackend {
+	privilegedBuilders := make([]phase0.BLSPubKey, 0)
+	for _, relay := range be.relays {
+		if bytes.Equal(relay.RelayEntry.PublicKey[:], pubKey[:]) {
+			privilegedBuilders = append(privilegedBuilders, relay.RelayEntry.PublicKey)
+		}
+	}
+	be.boost.privilegedBuilders = privilegedBuilders
+	return be
+}
+
 func (be *testBackend) request(t *testing.T, method, path string, payload any) *httptest.ResponseRecorder {
 	t.Helper()
 	var req *http.Request
@@ -333,7 +344,7 @@ func TestGetHeader(t *testing.T) {
 			12345,
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-			"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
+			backend.relays[0].RelayEntry.PublicKey.String(),
 			spec.DataVersionDeneb,
 		)
 		backend.relays[0].GetHeaderResponse = resp
@@ -348,7 +359,7 @@ func TestGetHeader(t *testing.T) {
 			12345,
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-			"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
+			backend.relays[0].RelayEntry.PublicKey.String(),
 			spec.DataVersionCapella,
 		)
 		resp.Capella.Message.Header.BlockHash = nilHash
@@ -375,7 +386,7 @@ func TestGetHeader(t *testing.T) {
 			12345,
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-			"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
+			backend.relays[0].RelayEntry.PublicKey.String(),
 			spec.DataVersionCapella,
 		)
 
@@ -397,7 +408,7 @@ func TestGetHeader(t *testing.T) {
 			12345,
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-			"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
+			backend.relays[0].RelayEntry.PublicKey.String(),
 			spec.DataVersionCapella,
 		)
 
@@ -469,7 +480,7 @@ func TestGetHeaderBids(t *testing.T) {
 			12345,
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-			"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
+			backend.relays[0].RelayEntry.PublicKey.String(),
 			spec.DataVersionCapella,
 		)
 
@@ -478,7 +489,7 @@ func TestGetHeaderBids(t *testing.T) {
 			12347,
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-			"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
+			backend.relays[1].RelayEntry.PublicKey.String(),
 			spec.DataVersionCapella,
 		)
 
@@ -487,7 +498,7 @@ func TestGetHeaderBids(t *testing.T) {
 			12346,
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-			"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
+			backend.relays[2].RelayEntry.PublicKey.String(),
 			spec.DataVersionCapella,
 		)
 
@@ -518,7 +529,7 @@ func TestGetHeaderBids(t *testing.T) {
 			12345,
 			"0xa38385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-			"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
+			backend.relays[0].RelayEntry.PublicKey.String(),
 			spec.DataVersionCapella,
 		)
 
@@ -526,7 +537,7 @@ func TestGetHeaderBids(t *testing.T) {
 			12345,
 			"0xa18385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-			"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
+			backend.relays[1].RelayEntry.PublicKey.String(),
 			spec.DataVersionCapella,
 		)
 
@@ -534,7 +545,7 @@ func TestGetHeaderBids(t *testing.T) {
 			12345,
 			"0xa28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-			"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
+			backend.relays[2].RelayEntry.PublicKey.String(),
 			spec.DataVersionCapella,
 		)
 
@@ -570,7 +581,7 @@ func TestGetHeaderBids(t *testing.T) {
 			12344,
 			"0xa28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-			"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
+			backend.relays[0].RelayEntry.PublicKey.String(),
 			spec.DataVersionCapella,
 		)
 
@@ -593,7 +604,7 @@ func TestGetHeaderBids(t *testing.T) {
 			12345,
 			"0xa28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-			"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
+			backend.relays[0].RelayEntry.PublicKey.String(),
 			spec.DataVersionCapella,
 		)
 
@@ -610,6 +621,42 @@ func TestGetHeaderBids(t *testing.T) {
 		value, err := resp.Value()
 		require.NoError(t, err)
 		require.Equal(t, uint256.NewInt(12345), value)
+	})
+
+	t.Run("Use header from a privileged relay", func(t *testing.T) {
+		backend := newTestBackend(t, 2, time.Second)
+		backend.setPrivilegedBuilders(backend.relays[0].RelayEntry.PublicKey)
+
+		// privileged relay
+		backend.relays[0].GetHeaderResponse = backend.relays[0].MakeGetHeaderResponse(
+			12348,
+			"0xa28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
+			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
+			backend.relays[0].RelayEntry.PublicKey.String(),
+			spec.DataVersionCapella,
+		)
+		// non-privileged relay with higher value
+		backend.relays[1].GetHeaderResponse = backend.relays[1].MakeGetHeaderResponse(
+			12349,
+			"0xa28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
+			"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
+			backend.relays[1].RelayEntry.PublicKey.String(),
+			spec.DataVersionCapella,
+		)
+
+		rr := backend.request(t, http.MethodGet, path, nil)
+
+		require.Equal(t, 1, backend.relays[0].GetRequestCount(path))
+		require.Equal(t, 1, backend.relays[1].GetRequestCount(path))
+
+		require.Equal(t, http.StatusOK, rr.Code, rr.Body.String())
+		// Highest value should be 12348, i.e. privileged relay.
+		resp := new(builderSpec.VersionedSignedBuilderBid)
+		err := json.Unmarshal(rr.Body.Bytes(), resp)
+		require.NoError(t, err)
+		value, err := resp.Value()
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(12348), value)
 	})
 }
 
@@ -883,7 +930,7 @@ func TestGetPayloadToAllRelays(t *testing.T) {
 		12345,
 		"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
 		"0xcf8e0d4e9587369b2301d0790347320302cc0943d5a1884560367e8208d920f2",
-		"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
+		backend.relays[0].RelayEntry.PublicKey.String(),
 		spec.DataVersionCapella,
 	)
 	rr := backend.request(t, http.MethodGet, getHeaderPath, nil)

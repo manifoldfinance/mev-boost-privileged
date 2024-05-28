@@ -264,6 +264,10 @@ Usage of mev-boost:
         relay monitor urls - single entry or comma-separated list (scheme://host)
   -relays string
         relay urls - single entry or comma-separated list (scheme://pubkey@host)
+	-privileged-builder
+				a single privileged builder(relay pubkey), can be specified multiple times
+	-privileged-builders string
+				privileged builders(relay pubkey) - single entry or comma-separated list
   -request-timeout-getheader int
         timeout for getHeader requests to the relay [ms] (default 950)
   -request-timeout-getpayload int
