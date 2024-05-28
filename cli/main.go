@@ -31,17 +31,18 @@ var (
 	errInvalidLoglevel = errors.New("invalid loglevel")
 
 	// defaults
-	defaultLogJSON           = os.Getenv("LOG_JSON") != ""
-	defaultLogLevel          = common.GetEnv("LOG_LEVEL", "info")
-	defaultListenAddr        = common.GetEnv("BOOST_LISTEN_ADDR", "localhost:18550")
-	defaultRelayCheck        = os.Getenv("RELAY_STARTUP_CHECK") != ""
-	defaultRelayMinBidEth    = common.GetEnvFloat64("MIN_BID_ETH", 0)
-	defaultDisableLogVersion = os.Getenv("DISABLE_LOG_VERSION") == "1" // disables adding the version to every log entry
-	defaultDebug             = os.Getenv("DEBUG") != ""
-	defaultLogServiceTag     = os.Getenv("LOG_SERVICE_TAG")
-	defaultRelays            = os.Getenv("RELAYS")
-	defaultRelayMonitors     = os.Getenv("RELAY_MONITORS")
-	defaultMaxRetries        = common.GetEnvInt("REQUEST_MAX_RETRIES", 5)
+	defaultLogJSON            = os.Getenv("LOG_JSON") != ""
+	defaultLogLevel           = common.GetEnv("LOG_LEVEL", "info")
+	defaultListenAddr         = common.GetEnv("BOOST_LISTEN_ADDR", "localhost:18550")
+	defaultRelayCheck         = os.Getenv("RELAY_STARTUP_CHECK") != ""
+	defaultRelayMinBidEth     = common.GetEnvFloat64("MIN_BID_ETH", 0)
+	defaultDisableLogVersion  = os.Getenv("DISABLE_LOG_VERSION") == "1" // disables adding the version to every log entry
+	defaultDebug              = os.Getenv("DEBUG") != ""
+	defaultLogServiceTag      = os.Getenv("LOG_SERVICE_TAG")
+	defaultRelays             = os.Getenv("RELAYS")
+	defaultRelayMonitors      = os.Getenv("RELAY_MONITORS")
+	defaultMaxRetries         = common.GetEnvInt("REQUEST_MAX_RETRIES", 5)
+	defaultPrivilegedBuilders = os.Getenv("PRIVILEGED_BUILDERS")
 
 	defaultGenesisForkVersion = common.GetEnv("GENESIS_FORK_VERSION", "")
 	defaultGenesisTime        = common.GetEnvInt("GENESIS_TIMESTAMP", -1)
@@ -54,8 +55,9 @@ var (
 	defaultTimeoutMsGetPayload        = common.GetEnvInt("RELAY_TIMEOUT_MS_GETPAYLOAD", 4000) // timeout for getPayload requests
 	defaultTimeoutMsRegisterValidator = common.GetEnvInt("RELAY_TIMEOUT_MS_REGVAL", 3000)     // timeout for registerValidator requests
 
-	relays        relayList
-	relayMonitors relayMonitorList
+	relays             relayList
+	relayMonitors      relayMonitorList
+	privilegedBuilders privilegedBuilderList
 
 	// cli flags
 	printVersion = flag.Bool("version", false, "only print version")
@@ -65,11 +67,12 @@ var (
 	logService   = flag.String("log-service", defaultLogServiceTag, "add a 'service=...' tag to all log messages")
 	logNoVersion = flag.Bool("log-no-version", defaultDisableLogVersion, "disables adding the version to every log entry")
 
-	listenAddr       = flag.String("addr", defaultListenAddr, "listen-address for mev-boost server")
-	relayURLs        = flag.String("relays", defaultRelays, "relay urls - single entry or comma-separated list (scheme://pubkey@host)")
-	relayCheck       = flag.Bool("relay-check", defaultRelayCheck, "check relay status on startup and on the status API call")
-	relayMinBidEth   = flag.Float64("min-bid", defaultRelayMinBidEth, "minimum bid to accept from a relay [eth]")
-	relayMonitorURLs = flag.String("relay-monitors", defaultRelayMonitors, "relay monitor urls - single entry or comma-separated list (scheme://host)")
+	listenAddr            = flag.String("addr", defaultListenAddr, "listen-address for mev-boost server")
+	relayURLs             = flag.String("relays", defaultRelays, "relay urls - single entry or comma-separated list (scheme://pubkey@host)")
+	relayCheck            = flag.Bool("relay-check", defaultRelayCheck, "check relay status on startup and on the status API call")
+	relayMinBidEth        = flag.Float64("min-bid", defaultRelayMinBidEth, "minimum bid to accept from a relay [eth]")
+	relayMonitorURLs      = flag.String("relay-monitors", defaultRelayMonitors, "relay monitor urls - single entry or comma-separated list (scheme://host)")
+	privilegedBuilderKeys = flag.String("privileged-builders", defaultPrivilegedBuilders, "single entry or comma-separated list of relay username (pubkey)")
 
 	relayTimeoutMsGetHeader  = flag.Int("request-timeout-getheader", defaultTimeoutMsGetHeader, "timeout for getHeader requests to the relay [ms]")
 	relayTimeoutMsGetPayload = flag.Int("request-timeout-getpayload", defaultTimeoutMsGetPayload, "timeout for getPayload requests to the relay [ms]")
@@ -94,6 +97,7 @@ func Main() {
 	// process repeatable flags
 	flag.Var(&relays, "relay", "a single relay, can be specified multiple times")
 	flag.Var(&relayMonitors, "relay-monitor", "a single relay monitor, can be specified multiple times")
+	flag.Var(&privilegedBuilders, "privileged-builder", "a single privileged builder, can be specified multiple times")
 
 	// parse flags and get started
 	flag.Parse()
@@ -148,13 +152,24 @@ func Main() {
 		}
 	}
 
+	// set relay priorities
+	if *privilegedBuilderKeys != "" {
+		for _, builderKey := range strings.Split(*privilegedBuilderKeys, ",") {
+			err := privilegedBuilders.Set(strings.TrimSpace(builderKey))
+			if err != nil {
+				log.WithError(err).WithField("privilegedBuilder", builderKey).Fatal("Invalid privileged builder")
+			}
+		}
+	}
+
 	if len(relays) == 0 {
 		flag.Usage()
 		log.Fatal("no relays specified")
 	}
 	log.Infof("using %d relays", len(relays))
 	for index, relay := range relays {
-		log.Infof("relay #%d: %s", index+1, relay.String())
+		isPrivileged := privilegedBuilders.Contains(relay.PublicKey)
+		log.Infof("relay #%d: %s, privileged %t", index+1, relay.String(), isPrivileged)
 	}
 
 	// For backwards compatibility with the -relay-monitors flag.
@@ -196,6 +211,7 @@ func Main() {
 		ListenAddr:               *listenAddr,
 		Relays:                   relays,
 		RelayMonitors:            relayMonitors,
+		PrivilegedBuilders:       privilegedBuilders,
 		GenesisForkVersionHex:    genesisForkVersionHex,
 		GenesisTime:              genesisTime,
 		RelayCheck:               *relayCheck,

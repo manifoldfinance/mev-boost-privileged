@@ -68,6 +68,7 @@ type BoostServiceOpts struct {
 	ListenAddr            string
 	Relays                []RelayEntry
 	RelayMonitors         []*url.URL
+	PrivilegedBuilders    []phase0.BLSPubKey
 	GenesisForkVersionHex string
 	GenesisTime           uint64
 	RelayCheck            bool
@@ -84,6 +85,7 @@ type BoostService struct {
 	listenAddr    string
 	relays        []RelayEntry
 	relayMonitors []*url.URL
+	privilegedBuilders []phase0.BLSPubKey
 	log           *logrus.Entry
 	srv           *http.Server
 	relayCheck    bool
@@ -115,15 +117,16 @@ func NewBoostService(opts BoostServiceOpts) (*BoostService, error) {
 	}
 
 	return &BoostService{
-		listenAddr:    opts.ListenAddr,
-		relays:        opts.Relays,
-		relayMonitors: opts.RelayMonitors,
-		log:           opts.Log,
-		relayCheck:    opts.RelayCheck,
-		relayMinBid:   opts.RelayMinBid,
-		genesisTime:   opts.GenesisTime,
-		bids:          make(map[bidRespKey]bidResp),
-		slotUID:       &slotUID{},
+		listenAddr:         opts.ListenAddr,
+		relays:             opts.Relays,
+		relayMonitors:      opts.RelayMonitors,
+		privilegedBuilders: opts.PrivilegedBuilders,
+		log:                opts.Log,
+		relayCheck:         opts.RelayCheck,
+		relayMinBid:        opts.RelayMinBid,
+		genesisTime:        opts.GenesisTime,
+		bids:               make(map[bidRespKey]bidResp),
+		slotUID:            &slotUID{},
 
 		builderSigningDomain: builderSigningDomain,
 		httpClientGetHeader: http.Client{
@@ -309,7 +312,7 @@ func (m *BoostService) handleRegisterValidator(w http.ResponseWriter, req *http.
 }
 
 // handleGetHeader requests bids from the relays
-func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request) {
+func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request) { //nolint:maintidx
 	vars := mux.Vars(req)
 	slot := vars["slot"]
 	parentHashHex := vars["parent_hash"]
@@ -367,6 +370,7 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 
 	// Prepare relay responses
 	result := bidResp{}                           // the final response, containing the highest bid (if any)
+	resultPrivileged := bidResp{}                       // the final response, containing the highest bid (if any) for privileged relays
 	relays := make(map[BlockHashHex][]RelayEntry) // relays that sent the bid for a specific blockHash
 
 	// Call the relays
@@ -463,33 +467,44 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 			// Remember which relays delivered which bids (multiple relays might deliver the top bid)
 			relays[BlockHashHex(bidInfo.blockHash.String())] = append(relays[BlockHashHex(bidInfo.blockHash.String())], relay)
 
-			// Compare the bid with already known top bid (if any)
-			if !result.response.IsEmpty() {
-				valueDiff := bidInfo.value.Cmp(result.bidInfo.value)
-				if valueDiff == -1 { // current bid is less profitable than already known one
-					return
-				} else if valueDiff == 0 { // current bid is equally profitable as already known one. Use hash as tiebreaker
-					previousBidBlockHash := result.bidInfo.blockHash
-					if bidInfo.blockHash.String() >= previousBidBlockHash.String() {
-						return
-					}
-				}
+			if m.isPrivilegedRelay(relay.PublicKey) {
+				m.setBestBid(&resultPrivileged, bidInfo, responsePayload, log)
+			} else {
+				m.setBestBid(&result, bidInfo, responsePayload, log)
 			}
-
-			// Use this relay's response as mev-boost response because it's most profitable
-			log.Debug("new best bid")
-			result.response = *responsePayload
-			result.bidInfo = bidInfo
-			result.t = time.Now()
 		}(relay)
 	}
 
 	// Wait for all requests to complete...
 	wg.Wait()
 
-	if result.response.IsEmpty() {
+	if resultPrivileged.response.IsEmpty() && result.response.IsEmpty() {
 		log.Info("no bid received")
 		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if !resultPrivileged.response.IsEmpty() {
+		// Log result privileged
+		valueEth := weiBigIntToEthBigFloat(resultPrivileged.bidInfo.value.ToBig())
+		resultPrivileged.relays = relays[BlockHashHex(resultPrivileged.bidInfo.blockHash.String())]
+		log.WithFields(logrus.Fields{
+			"blockHash":   resultPrivileged.bidInfo.blockHash.String(),
+			"blockNumber": resultPrivileged.bidInfo.blockNumber,
+			"txRoot":      resultPrivileged.bidInfo.txRoot.String(),
+			"value":       valueEth.Text('f', 18),
+			"relays":      strings.Join(RelayEntriesToStrings(resultPrivileged.relays), ", "),
+			"privileged":  true,
+		}).Info("best privileged bid")
+
+		// Remember the bid, for future logging in case of withholding
+		bidKey := bidRespKey{slot: _slot, blockHash: resultPrivileged.bidInfo.blockHash.String()}
+		m.bidsLock.Lock()
+		m.bids[bidKey] = resultPrivileged
+		m.bidsLock.Unlock()
+
+		// Return the bid
+		m.respondOK(w, &resultPrivileged.response)
 		return
 	}
 
@@ -502,6 +517,7 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 		"txRoot":      result.bidInfo.txRoot.String(),
 		"value":       valueEth.Text('f', 18),
 		"relays":      strings.Join(RelayEntriesToStrings(result.relays), ", "),
+		"privileged":  false,
 	}).Info("best bid")
 
 	// Remember the bid, for future logging in case of withholding
@@ -512,6 +528,27 @@ func (m *BoostService) handleGetHeader(w http.ResponseWriter, req *http.Request)
 
 	// Return the bid
 	m.respondOK(w, &result.response)
+}
+
+func (m *BoostService) setBestBid(result *bidResp, bidInfo bidInfo, responsePayload *builderSpec.VersionedSignedBuilderBid, log *logrus.Entry) {
+	// Compare the bid with already known top bid (if any)
+	if !result.response.IsEmpty() {
+		valueDiff := bidInfo.value.Cmp(result.bidInfo.value)
+		if valueDiff == -1 { // current bid is less profitable than already known one
+			return
+		} else if valueDiff == 0 { // current bid is equally profitable as already known one. Use hash as tiebreaker
+			previousBidBlockHash := result.bidInfo.blockHash
+			if bidInfo.blockHash.String() >= previousBidBlockHash.String() {
+				return
+			}
+		}
+	}
+
+	// Use this relay's response as mev-boost response because it's most profitable
+	log.Debug("new best bid")
+	result.response = *responsePayload
+	result.bidInfo = bidInfo
+	result.t = time.Now()
 }
 
 func (m *BoostService) processCapellaPayload(w http.ResponseWriter, req *http.Request, log *logrus.Entry, payload *eth2ApiV1Capella.SignedBlindedBeaconBlock, body []byte) {
@@ -853,4 +890,13 @@ func (m *BoostService) CheckRelays() int {
 	// At the end, wait for every routine and return status according to relay's ones.
 	wg.Wait()
 	return int(numSuccessRequestsToRelay)
+}
+
+func (m *BoostService) isPrivilegedRelay(pubkey phase0.BLSPubKey) bool {
+	for _, builder := range m.privilegedBuilders {
+		if bytes.Equal(builder[:], pubkey[:]) {
+			return true
+		}
+	}
+	return false
 }
