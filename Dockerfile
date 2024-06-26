@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1
 FROM golang:1.22 as builder
 ARG VERSION
+ARG VCS_REF
+ARG BUILD_DATE
 WORKDIR /build
 
 COPY go.mod ./
