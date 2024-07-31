@@ -18,11 +18,9 @@ import (
 	builderApi "github.com/attestantio/go-builder-client/api"
 	builderApiV1 "github.com/attestantio/go-builder-client/api/v1"
 	builderSpec "github.com/attestantio/go-builder-client/spec"
-	eth2ApiV1Capella "github.com/attestantio/go-eth2-client/api/v1/capella"
 	eth2ApiV1Deneb "github.com/attestantio/go-eth2-client/api/v1/deneb"
 	"github.com/attestantio/go-eth2-client/spec/phase0"
 	"github.com/flashbots/go-boost-utils/ssz"
-	"github.com/flashbots/go-boost-utils/utils"
 	"github.com/flashbots/go-utils/httplogger"
 	"github.com/flashbots/mev-boost/config"
 	"github.com/flashbots/mev-boost/server/params"
@@ -823,14 +821,8 @@ func (m *BoostService) handleGetPayload(w http.ResponseWriter, req *http.Request
 	// Decode the body now
 	payload := new(eth2ApiV1Deneb.SignedBlindedBeaconBlock)
 	if err := DecodeJSON(bytes.NewReader(body), payload); err != nil {
-		log.Debug("could not decode Deneb request payload, attempting to decode body into Capella payload")
-		payload := new(eth2ApiV1Capella.SignedBlindedBeaconBlock)
-		if err := DecodeJSON(bytes.NewReader(body), payload); err != nil {
-			log.WithError(err).WithField("body", string(body)).Error("could not decode request payload from the beacon-node (signed blinded beacon block)")
-			m.respondError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		m.processCapellaPayload(w, req, log, payload, body)
+		log.WithError(err).WithField("body", string(body)).Error("could not decode request payload from the beacon-node (signed blinded beacon block)")
+		m.respondError(w, http.StatusBadRequest, err.Error())
 		return
 	}
 	m.processDenebPayload(w, req, log, payload)
