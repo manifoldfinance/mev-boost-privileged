@@ -28,16 +28,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-const (
-	mockRelaySecretKeyHex = "0x4e343a647c5a5c44d76c2c58b63f02cdf3a9a0ec40f102ebc26363b4b1b95033"
-)
-
-var (
-	skBytes, _            = hexutil.Decode(mockRelaySecretKeyHex)
-	mockRelaySecretKey, _ = bls.SecretKeyFromBytes(skBytes)
-	mockRelayPublicKey, _ = bls.PublicKeyFromSecretKey(mockRelaySecretKey)
-)
-
 // Relay is used to fake a relay's behavior.
 // You can override each of its handler by setting the instance's HandlerOverride_METHOD_TO_OVERRIDE to your own
 // handler.
@@ -72,7 +62,11 @@ type Relay struct {
 // A secret key must be provided to sign default and custom response messages
 func NewRelay(t *testing.T) *Relay {
 	t.Helper()
-	relay := &Relay{t: t, secretKey: mockRelaySecretKey, publicKey: mockRelayPublicKey, requestCount: make(map[string]int)}
+
+	relay := &Relay{t: t, requestCount: make(map[string]int)}
+
+	relay.secretKey, _, _ = bls.GenerateNewKeypair()
+	relay.publicKey, _ = bls.PublicKeyFromSecretKey(relay.secretKey)
 
 	// Initialize server
 	relay.Server = httptest.NewServer(relay.getRouter())
@@ -80,7 +74,7 @@ func NewRelay(t *testing.T) *Relay {
 	// Create the RelayEntry with correct pubkey
 	url, err := url.Parse(relay.Server.URL)
 	require.NoError(t, err)
-	urlWithKey := fmt.Sprintf("%s://%s@%s", url.Scheme, hexutil.Encode(bls.PublicKeyToBytes(mockRelayPublicKey)), url.Host)
+	urlWithKey := fmt.Sprintf("%s://%s@%s", url.Scheme, hexutil.Encode(bls.PublicKeyToBytes(relay.publicKey)), url.Host)
 	relay.RelayEntry, err = types.NewRelayEntry(urlWithKey)
 	require.NoError(t, err)
 	return relay
@@ -224,7 +218,7 @@ func (m *Relay) defaultHandleGetHeader(w http.ResponseWriter) {
 		12345,
 		"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
 		"0xe28385e7bd68df656cd0042b74b69c3104b5356ed1f20eb69f1f925df47a3ab7",
-		"0x8a1d7b8dd64e0aafe7ea7b6c95065c9364cf99d38470c12ee807d55f7de1529ad29ce2c422e0b65e3d5a05c02caca249",
+		m.RelayEntry.PublicKey.String(),
 		spec.DataVersionDeneb,
 	)
 	if m.GetHeaderResponse != nil {
